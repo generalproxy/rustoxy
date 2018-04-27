@@ -1,0 +1,13 @@
+[package]
+name = "rustoxy"
+version = "0.1.0"
+authors = ["Joe Ren <earthengine@gmail.com>"]
+
+[dependencies]
+log = "*"
+env_logger = "*"
+futures = "0.1"
+native-tls = "*"
+tokio-core = "*"
+tokio-io = "*"
+
