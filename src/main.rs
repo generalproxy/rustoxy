@@ -50,17 +50,19 @@ extern crate tokio_io;
 mod transfer;
 mod client;
 mod client_channel;
+mod either_future;
+mod buffer;
 
-use std::cell::RefCell;
 use std::env;
 use std::net::SocketAddr;
-use std::rc::Rc;
 
 use futures::future;
 use futures::{Future, Stream};
 use tokio_core::reactor::Core;
 
 use client_channel::{ClientChannel, listen_tcp};
+
+use buffer::Buffer;
 
 fn main() {
     env::set_var("RUST_LOG", "info");
@@ -75,7 +77,7 @@ fn main() {
     // Here we create the event loop, the global buffer that all threads will
     // read/write into, and the bound TCP listener itself.
     let mut lp = Core::new().unwrap();
-    let buffer = Rc::new(RefCell::new(vec![0; 64 * 1024]));
+    let buffer = Buffer::new();
     let handle = lp.handle();
 
     // Construct a future representing our server. This future processes all

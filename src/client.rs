@@ -3,18 +3,21 @@ use tokio_io::io::{read_exact, write_all, Window};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::io::{self};
 use futures::future;
 
+use either_future::EitherFuture::{Left,Right};
+
+use buffer::Buffer;
+
 // Data used to when processing a client to perform various operations over its
 // lifetime.
 pub struct Client {
     conn: Option<TcpStream>,
-    buffer: Rc<RefCell<Vec<u8>>>,
+    buffer: Buffer,
     //dns: BasicClientHandle,
     handle: Handle,
     addr: SocketAddr
@@ -24,7 +27,7 @@ impl Client {
     pub fn get_addr(&self) -> SocketAddr{
         self.addr
     }
-    pub fn new(s: TcpStream, buf: &Rc<RefCell<Vec<u8>>>, h: &Handle, a: SocketAddr) -> Client {
+    pub fn new(s: TcpStream, buf: &Buffer, h: &Handle, a: SocketAddr) -> Client {
         Client { conn:Some(s), buffer: buf.clone(), handle: h.clone(), addr: a }
     }
     /// This is the main entry point for starting a SOCKS proxy connection.
@@ -48,13 +51,15 @@ impl Client {
         self.conn = None;
         read_exact(conn, [0u8]).and_then(move |(conn, buf)| {
             match buf[0] {
-                v5::VERSION => mybox(self.serve_v5(conn)),
+                v5::VERSION => Left(self.serve_v5(conn)),
 
                 // If we hit an unknown version, we return a "terminal future"
                 // which represents that this future has immediately failed. In
                 // this case the type of the future is `io::Error`, so we use a
                 // helper function, `other`, to create an error quickly.
-                _ => box future::err(other("unsupported version")),
+                //
+                // As version 4 was not supported, we change the word to "unsupported version".
+                _ => Right(future::err(other("unsupported version"))),
             }
         })
     }

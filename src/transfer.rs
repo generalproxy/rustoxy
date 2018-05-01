@@ -1,11 +1,12 @@
 use std::net::SocketAddr;
 use futures::{Future,Poll,Async};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::str;
 use tokio_core::net::TcpStream;
-use std::io::{self, Read, Write};
+use std::io::{self};
 use std::net::{Shutdown, ToSocketAddrs};
+
+use buffer::Buffer;
 
 
 /// A future representing reading all data from one side of a proxy connection
@@ -22,7 +23,7 @@ pub struct Transfer {
     writer: Rc<TcpStream>,
 
     // The shared global buffer that all connections on our server are using.
-    buf: Rc<RefCell<Vec<u8>>>,
+    buf: Buffer,
 
     // The number of bytes we've written so far.
     amt: u64,
@@ -32,7 +33,7 @@ pub struct Transfer {
 impl Transfer {
     pub fn new(reader: Rc<TcpStream>,
            writer: Rc<TcpStream>,
-           buffer: Rc<RefCell<Vec<u8>>>/*, rs:SocketAddr, ws:SocketAddr*/) -> Transfer {
+           buffer: Buffer) -> Transfer {
         let mut ds = "unknown address".to_string();
         if let (Ok(rd), Ok(wr)) = (reader.peer_addr(), writer.peer_addr()) {
             ds = format!("{:?} -> {:?}", rd, wr);
@@ -73,7 +74,7 @@ impl Future for Transfer {
     /// bytes were transferred), so we don't need to maintain state beyond that
     /// point.
     fn poll(&mut self) -> Poll<u64, io::Error> {
-        let mut buffer = self.buf.borrow_mut();
+        //let mut buffer = self.buf.borrow_mut();
 
         // Here we loop over the two TCP halves, reading all data from one
         // connection and writing it to another. The crucial performance aspect
@@ -115,7 +116,8 @@ impl Future for Transfer {
             // This means that we may trip the assert below, but it should be
             // relatively easily fixable with the strategy above!
 
-            let n = try_nb!((&*self.reader).read(&mut buffer));
+            //let n = try_nb!((&*self.reader).read(&mut buffer));
+            let n = try_nb!(self.buf.read(self.reader.clone()));
             info!("received {} bytes ({})", n, self.debug_string);
             if n == 0 {
                 try!(self.writer.shutdown(Shutdown::Write));
@@ -127,7 +129,8 @@ impl Future for Transfer {
             // that would play into the logic mentioned above (tracking read
             // rates and write rates), so we just ferry along that error for
             // now.
-            let m = try!((&*self.writer).write(&buffer[..n]));
+            //let m = try!((&*self.writer).write(&buffer[..n]));
+            let m = self.buf.write(self.writer.clone(), n)?;
             assert_eq!(n, m);
         }
     }
