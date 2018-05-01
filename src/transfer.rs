@@ -1,10 +1,9 @@
-use std::net::SocketAddr;
 use futures::{Future,Poll,Async};
 use std::rc::Rc;
 use std::str;
 use tokio_core::net::TcpStream;
 use std::io::{self};
-use std::net::{Shutdown, ToSocketAddrs};
+use std::net::Shutdown;
 
 use buffer::Buffer;
 
@@ -117,7 +116,7 @@ impl Future for Transfer {
             // relatively easily fixable with the strategy above!
 
             //let n = try_nb!((&*self.reader).read(&mut buffer));
-            let n = try_nb!(self.buf.read(self.reader.clone()));
+            let n = try_nb!(self.buf.read(&mut &*self.reader));
             info!("received {} bytes ({})", n, self.debug_string);
             if n == 0 {
                 try!(self.writer.shutdown(Shutdown::Write));
@@ -130,7 +129,7 @@ impl Future for Transfer {
             // rates and write rates), so we just ferry along that error for
             // now.
             //let m = try!((&*self.writer).write(&buffer[..n]));
-            let m = self.buf.write(self.writer.clone(), n)?;
+            let m = self.buf.write(&mut &*self.writer, n)?;
             assert_eq!(n, m);
         }
     }
@@ -138,30 +137,4 @@ impl Future for Transfer {
 
 pub fn other(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
-}
-
-// Extracts the name and port from addr_buf and returns them, converting
-// the name to the form that the trust-dns client can use. If the original
-// name can be parsed as an IP address, makes a SocketAddr from that
-// address and the port and returns it; we skip DNS resolution in that
-// case.
-pub fn name_port(addr_buf: &[u8]) -> io::Result<SocketAddr> {
-    // The last two bytes of the buffer are the port, and the other parts of it
-    // are the hostname.
-    let hostname = &addr_buf[..addr_buf.len() - 2];
-    let hostname = try!(str::from_utf8(hostname).map_err(|_e| {
-        other("hostname buffer provided was not valid utf-8")
-    }));
-    let pos = addr_buf.len() - 2;
-    let port = ((addr_buf[pos] as u16) << 8) | (addr_buf[pos + 1] as u16);
-
-    if let Ok(ip) = hostname.parse() {
-        return Ok(SocketAddr::new(ip, port))
-    }
-
-    format!("{}:{}",hostname,port).to_socket_addrs()?.next()
-    .map_or(Err(other("host name didn't resolve to valid IP address")), |a| {
-        info!("target: {}:{} = {:?}", hostname, port, a);
-        Ok(a)
-    })
 }

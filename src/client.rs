@@ -1,17 +1,19 @@
-use transfer::{other,name_port,Transfer};
+use transfer::{other,Transfer};
 use tokio_io::io::{read_exact, write_all, Window};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
 use std::rc::Rc;
 use std::time::Duration;
-use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::io::{self};
 use futures::future;
 
 use either_future::EitherFuture::{Left,Right};
 
 use buffer::Buffer;
+
+use std::str;
 
 // Data used to when processing a client to perform various operations over its
 // lifetime.
@@ -405,4 +407,30 @@ mod v5 {
     pub const ATYP_IPV4: u8 = 1;
     pub const ATYP_IPV6: u8 = 4;
     pub const ATYP_DOMAIN: u8 = 3;
+}
+
+// Extracts the name and port from addr_buf and returns them, converting
+// the name to the form that the trust-dns client can use. If the original
+// name can be parsed as an IP address, makes a SocketAddr from that
+// address and the port and returns it; we skip DNS resolution in that
+// case.
+pub fn name_port(addr_buf: &[u8]) -> io::Result<SocketAddr> {
+    // The last two bytes of the buffer are the port, and the other parts of it
+    // are the hostname.
+    let hostname = &addr_buf[..addr_buf.len() - 2];
+    let hostname = try!(str::from_utf8(hostname).map_err(|_e| {
+        other("hostname buffer provided was not valid utf-8")
+    }));
+    let pos = addr_buf.len() - 2;
+    let port = ((addr_buf[pos] as u16) << 8) | (addr_buf[pos + 1] as u16);
+
+    if let Ok(ip) = hostname.parse() {
+        return Ok(SocketAddr::new(ip, port))
+    }
+
+    format!("{}:{}",hostname,port).to_socket_addrs()?.next()
+    .map_or(Err(other("host name didn't resolve to valid IP address")), |a| {
+        info!("target: {}:{} = {:?}", hostname, port, a);
+        Ok(a)
+    })
 }
