@@ -1,25 +1,24 @@
-use transfer::{other,Transfer};
+use transfer::Transfer;
 use tokio_io::io::{read_exact, write_all, Window};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
 use std::rc::Rc;
 use std::time::Duration;
-use std::net::{SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::io::{self};
 use futures::future;
 
-use either_future::EitherFuture::{Left,Right};
+use utilities::EitherFuture::{Left,Right};
+use utilities::{other,name_port};
 
-use buffer::Buffer;
-
-use std::str;
+use buffer::RcBuffer;
 
 // Data used to when processing a client to perform various operations over its
 // lifetime.
 pub struct Client {
     conn: Option<TcpStream>,
-    buffer: Buffer,
+    buffer: RcBuffer,
     //dns: BasicClientHandle,
     handle: Handle,
     addr: SocketAddr
@@ -29,7 +28,7 @@ impl Client {
     pub fn get_addr(&self) -> SocketAddr{
         self.addr
     }
-    pub fn new(s: TcpStream, buf: &Buffer, h: &Handle, a: SocketAddr) -> Client {
+    pub fn new(s: TcpStream, buf: &RcBuffer, h: &Handle, a: SocketAddr) -> Client {
         Client { conn:Some(s), buffer: buf.clone(), handle: h.clone(), addr: a }
     }
     /// This is the main entry point for starting a SOCKS proxy connection.
@@ -160,18 +159,18 @@ impl Client {
                 // For IPv4 addresses, we read the 4 bytes for the address as
                 // well as 2 bytes for the port.
                 v5::ATYP_IPV4 => {
-                    mybox(read_exact(c, [0u8; 6]).map(|(c, buf)| {
+                    Left(Left(read_exact(c, [0u8; 6]).map(|(c, buf)| {
                         let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
                         let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
                         let addr = SocketAddrV4::new(addr, port);
                         (c, SocketAddr::V4(addr))
-                    }))
+                    })))
                 }
 
                 // For IPv6 addresses there's 16 bytes of an address plus two
                 // bytes for a port, so we read that off and then keep going.
                 v5::ATYP_IPV6 => {
-                    mybox(read_exact(c, [0u8; 18]).map(|(conn, buf)| {
+                    Left(Right(read_exact(c, [0u8; 18]).map(|(conn, buf)| {
                         let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
                         let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
                         let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
@@ -184,7 +183,7 @@ impl Client {
                         let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
                         let addr = SocketAddrV6::new(addr, port, 0, 0);
                         (conn, SocketAddr::V6(addr))
-                    }))
+                    })))
                 }
 
                 // The SOCKSv5 protocol not only supports proxying to specific
@@ -214,19 +213,19 @@ impl Client {
                 // lookups.
                 v5::ATYP_DOMAIN => {
                     debug!("domain!");
-                    mybox(read_exact(c, [0u8]).and_then(|(conn, buf)| {
+                    Right(Left(read_exact(c, [0u8]).and_then(|(conn, buf)| {
                         read_exact(conn, vec![0u8; buf[0] as usize + 2])
                     }).and_then(move |(conn, buf)| {                        
                         match name_port(&buf) {
-                            Ok(ad) => mybox(future::ok((conn,ad))),
-                            Err(e) => return mybox(future::err(e)),
+                            Ok(ad) => Left(future::ok((conn,ad))),
+                            Err(e) => Right(future::err(e)),
                         }
-                    }))
+                    })))
                 }
 
                 n => {
                     let msg = format!("unknown ATYP received: {}", n);
-                    box future::err(other(&msg))
+                    Right(Right(future::err(other(&msg))))
                 }
             }
         });
@@ -386,9 +385,6 @@ impl Client {
     }
 }
 
-fn mybox<F: Future + 'static>(f: F) -> Box<Future<Item=F::Item, Error=F::Error>> {
-    box f
-}
 
 // Various constants associated with the SOCKS protocol
 
@@ -407,30 +403,4 @@ mod v5 {
     pub const ATYP_IPV4: u8 = 1;
     pub const ATYP_IPV6: u8 = 4;
     pub const ATYP_DOMAIN: u8 = 3;
-}
-
-// Extracts the name and port from addr_buf and returns them, converting
-// the name to the form that the trust-dns client can use. If the original
-// name can be parsed as an IP address, makes a SocketAddr from that
-// address and the port and returns it; we skip DNS resolution in that
-// case.
-pub fn name_port(addr_buf: &[u8]) -> io::Result<SocketAddr> {
-    // The last two bytes of the buffer are the port, and the other parts of it
-    // are the hostname.
-    let hostname = &addr_buf[..addr_buf.len() - 2];
-    let hostname = try!(str::from_utf8(hostname).map_err(|_e| {
-        other("hostname buffer provided was not valid utf-8")
-    }));
-    let pos = addr_buf.len() - 2;
-    let port = ((addr_buf[pos] as u16) << 8) | (addr_buf[pos + 1] as u16);
-
-    if let Ok(ip) = hostname.parse() {
-        return Ok(SocketAddr::new(ip, port))
-    }
-
-    format!("{}:{}",hostname,port).to_socket_addrs()?.next()
-    .map_or(Err(other("host name didn't resolve to valid IP address")), |a| {
-        info!("target: {}:{} = {:?}", hostname, port, a);
-        Ok(a)
-    })
 }

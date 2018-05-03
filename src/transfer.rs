@@ -1,11 +1,10 @@
 use futures::{Future,Poll,Async};
 use std::rc::Rc;
-use std::str;
 use tokio_core::net::TcpStream;
 use std::io::{self};
 use std::net::Shutdown;
 
-use buffer::Buffer;
+use buffer::{Buffer,RcBuffer};
 
 
 /// A future representing reading all data from one side of a proxy connection
@@ -22,7 +21,7 @@ pub struct Transfer {
     writer: Rc<TcpStream>,
 
     // The shared global buffer that all connections on our server are using.
-    buf: Buffer,
+    buf: RcBuffer,
 
     // The number of bytes we've written so far.
     amt: u64,
@@ -32,7 +31,7 @@ pub struct Transfer {
 impl Transfer {
     pub fn new(reader: Rc<TcpStream>,
            writer: Rc<TcpStream>,
-           buffer: Buffer) -> Transfer {
+           buffer: RcBuffer) -> Transfer {
         let mut ds = "unknown address".to_string();
         if let (Ok(rd), Ok(wr)) = (reader.peer_addr(), writer.peer_addr()) {
             ds = format!("{:?} -> {:?}", rd, wr);
@@ -133,8 +132,4 @@ impl Future for Transfer {
             assert_eq!(n, m);
         }
     }
-}
-
-pub fn other(desc: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
 }

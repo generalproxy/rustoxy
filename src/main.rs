@@ -1,5 +1,3 @@
-#![feature(box_syntax)]
-
 //! An example [SOCKSv5] proxy server on top of futures
 //!
 //! [SOCKSv5]: https://www.ietf.org/rfc/rfc1928.txt
@@ -50,7 +48,7 @@ extern crate tokio_io;
 mod transfer;
 mod client;
 mod client_channel;
-mod either_future;
+mod utilities;
 mod buffer;
 
 use std::env;
@@ -62,7 +60,7 @@ use tokio_core::reactor::Core;
 
 use client_channel::{ClientChannel, listen_tcp};
 
-use buffer::Buffer;
+use buffer::RcBuffer;
 
 fn main() {
     env::set_var("RUST_LOG", "info");
@@ -77,7 +75,7 @@ fn main() {
     // Here we create the event loop, the global buffer that all threads will
     // read/write into, and the bound TCP listener itself.
     let mut lp = Core::new().unwrap();
-    let buffer = Buffer::new();
+    let buffer = RcBuffer::new();
     let handle = lp.handle();
 
     // Construct a future representing our server. This future processes all
