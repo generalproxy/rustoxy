@@ -36,7 +36,7 @@
 //! You can try out this server with `cargo test` or just `cargo run` and
 //! throwing connections at it yourself, and there should be plenty of comments
 //! below to help walk you through the implementation as well!
-
+#![feature(core_intrinsics)]
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -44,6 +44,9 @@ extern crate futures;
 #[macro_use]
 extern crate tokio_core;
 extern crate tokio_io;
+#[macro_use()]
+extern crate enum_primitive;
+extern crate num;
 
 mod transfer;
 mod client;

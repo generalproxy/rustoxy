@@ -29,6 +29,3 @@ impl Buffer for RcBuffer {
         writer.write(&buffer[..n])
     }
 }
-
-
-

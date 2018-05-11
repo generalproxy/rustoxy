@@ -9,4 +9,6 @@ env_logger = "*"
 futures = "0.1"
 tokio-core = "*"
 tokio-io = "*"
-
+serde = "*"
+enum_primitive = "*"
+num = "*"

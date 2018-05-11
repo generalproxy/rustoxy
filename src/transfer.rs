@@ -1,11 +1,14 @@
 use futures::{Future,Poll,Async};
 use std::rc::Rc;
 use tokio_core::net::TcpStream;
-use std::io::{self};
+use std::io::{self, Read, Write};
 use std::net::Shutdown;
 
 use buffer::{Buffer,RcBuffer};
 
+trait Transfer: Read + Write + Future<Item=u64,Error=io::Error> {
+    fn is_ready(&self) -> bool;
+}
 
 /// A future representing reading all data from one side of a proxy connection
 /// and writing it to another.
@@ -15,7 +18,7 @@ use buffer::{Buffer,RcBuffer};
 /// This is intended to show off how the combinators are not all that can be
 /// done with futures, but rather more custom (or optimized) implementations can
 /// be implemented with just a trait impl!
-pub struct Transfer {
+struct TcpTransfer {
     // The two I/O objects we'll be reading.
     reader: Rc<TcpStream>,
     writer: Rc<TcpStream>,
@@ -28,31 +31,48 @@ pub struct Transfer {
     debug_string: String
 }
 
-impl Transfer {
+impl Read for TcpTransfer {
+    fn read(&mut self, buf:&mut [u8]) -> Result<usize, io::Error> {
+        (&*self.reader).read(buf)
+    }
+}
+impl Write for TcpTransfer {
+    fn write(&mut self, buf:&[u8]) -> Result<usize, io::Error> {
+        if buf.len()==0 {
+            (&*self.writer).shutdown(Shutdown::Write)?;
+            Ok(0)
+        } else {
+            (&*self.writer).write(buf)
+        }
+    }
+    fn flush(&mut self) -> Result<(), io::Error> {
+        (&*self.writer).flush()
+    }
+}
+
+impl TcpTransfer {
     pub fn new(reader: Rc<TcpStream>,
            writer: Rc<TcpStream>,
-           buffer: RcBuffer) -> Transfer {
+           buffer: RcBuffer) -> TcpTransfer {
         let mut ds = "unknown address".to_string();
         if let (Ok(rd), Ok(wr)) = (reader.peer_addr(), writer.peer_addr()) {
             ds = format!("{:?} -> {:?}", rd, wr);
         }
 
-        Transfer {
+        TcpTransfer {
             reader: reader,
             writer: writer,
             buf: buffer,
             amt: 0,
             debug_string: ds
         }
-    }
+    }        
 }
-
-
 
 // Here we implement the `Future` trait for `Transfer` directly. This does not
 // use any combinators, and shows how you might implement it in custom
 // situations if needed.
-impl Future for Transfer {
+impl Future for TcpTransfer {
     // Our future resolves to the number of bytes transferred, or an I/O error
     // that happens during the connection, if any.
     type Item = u64;
@@ -80,9 +100,7 @@ impl Future for Transfer {
         // the write half are ready on the connection, allowing the buffer to
         // only be temporarily used in a small window for all connections.
         loop {
-            let read_ready = self.reader.poll_read().is_ready();
-            let write_ready = self.writer.poll_write().is_ready();
-            if !read_ready || !write_ready {
+           if !self.is_ready() {
                 return Ok(Async::NotReady)
             }
 
@@ -115,12 +133,8 @@ impl Future for Transfer {
             // relatively easily fixable with the strategy above!
 
             //let n = try_nb!((&*self.reader).read(&mut buffer));
-            let n = try_nb!(self.buf.read(&mut &*self.reader));
+            let n = try_nb!(self.buf.clone().read(self));
             info!("received {} bytes ({})", n, self.debug_string);
-            if n == 0 {
-                try!(self.writer.shutdown(Shutdown::Write));
-                return Ok(self.amt.into())
-            }
             self.amt += n as u64;
 
             // Unlike above, we don't handle `WouldBlock` specially, because
@@ -128,8 +142,26 @@ impl Future for Transfer {
             // rates and write rates), so we just ferry along that error for
             // now.
             //let m = try!((&*self.writer).write(&buffer[..n]));
-            let m = self.buf.write(&mut &*self.writer, n)?;
+            let m = self.buf.clone().write(self, n)?;
             assert_eq!(n, m);
         }
     }
+}
+
+impl Transfer for TcpTransfer {
+    fn is_ready(&self) -> bool {
+        let read_ready = self.reader.poll_read().is_ready();
+        let write_ready = self.writer.poll_write().is_ready();
+        return read_ready && write_ready;
+    }
+}
+
+pub fn transfer(ep1: TcpStream, ep2: TcpStream, buffer: RcBuffer) 
+    -> impl Future<Item=(u64,u64), Error=io::Error> {
+    let ep1 = Rc::new(ep1);
+    let ep2 = Rc::new(ep2);
+
+    let half1 = TcpTransfer::new(ep1.clone(), ep2.clone(), buffer.clone());
+    let half2 = TcpTransfer::new(ep2, ep1, buffer);
+    half1.join(half2)
 }
