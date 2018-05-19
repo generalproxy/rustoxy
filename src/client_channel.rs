@@ -8,11 +8,9 @@ use std::net::SocketAddr;
 use tokio_core::net::TcpListener;
 use std::io;
 
-use buffer::RcBuffer;
-
 pub trait ClientChannel {
     type OutputStream: Stream<Item=Client, Error=io::Error>;
-    fn clients(self, buffer: RcBuffer, handle:&Handle) -> Self::OutputStream;
+    fn clients(self, handle:&Handle) -> Self::OutputStream;
 }
 
 pub fn listen_tcp(addr: &SocketAddr, handle:&Handle) -> io::Result<impl ClientChannel> {
@@ -21,8 +19,7 @@ pub fn listen_tcp(addr: &SocketAddr, handle:&Handle) -> io::Result<impl ClientCh
 
 struct TcpClientStream {
     s: Incoming,
-    h: Handle,
-    b: RcBuffer
+    h: Handle
 }
 
 struct TcpListenerChannel {
@@ -40,7 +37,7 @@ impl Stream for TcpClientStream {
     type Error = io::Error;
     fn poll(&mut self) -> io::Result<Async<Option<Client>>> {
         match self.s.poll() {
-            Ok(Ready(Some((c,a)))) => Ok(Ready(Some(Client::new(c,&self.b,&self.h,a)))),
+            Ok(Ready(Some((c,a)))) => Ok(Ready(Some(Client::new(c,&self.h,a)))),
             Ok(Ready(None)) => Ok(Ready(None)),
             Ok(NotReady) => Ok(NotReady),
             Err(e) => Err(e)
@@ -50,7 +47,7 @@ impl Stream for TcpClientStream {
 
 impl ClientChannel for TcpListenerChannel {
     type OutputStream = TcpClientStream;
-    fn clients(self, buffer: RcBuffer, handle:&Handle) -> TcpClientStream {
-        TcpClientStream { s: self.listener.incoming(), h:handle.clone(), b:buffer }
+    fn clients(self, handle:&Handle) -> TcpClientStream {
+        TcpClientStream { s: self.listener.incoming(), h:handle.clone() }
     }
 }

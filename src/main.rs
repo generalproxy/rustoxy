@@ -36,23 +36,22 @@
 //! You can try out this server with `cargo test` or just `cargo run` and
 //! throwing connections at it yourself, and there should be plenty of comments
 //! below to help walk you through the implementation as well!
-#![feature(core_intrinsics)]
+//#![feature(core_intrinsics)]
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 extern crate futures;
-#[macro_use]
+//#[macro_use]
 extern crate tokio_core;
 extern crate tokio_io;
-#[macro_use()]
-extern crate enum_primitive;
-extern crate num;
+//#[macro_use()]
+//extern crate enum_primitive;
+//extern crate num;
 
-mod transfer;
 mod client;
 mod client_channel;
 mod utilities;
-mod buffer;
+mod endpoint;
 
 use std::env;
 use std::net::SocketAddr;
@@ -62,8 +61,6 @@ use futures::{Future, Stream};
 use tokio_core::reactor::Core;
 
 use client_channel::{ClientChannel, listen_tcp};
-
-use buffer::RcBuffer;
 
 fn main() {
     env::set_var("RUST_LOG", "info");
@@ -78,7 +75,6 @@ fn main() {
     // Here we create the event loop, the global buffer that all threads will
     // read/write into, and the bound TCP listener itself.
     let mut lp = Core::new().unwrap();
-    let buffer = RcBuffer::new();
     let handle = lp.handle();
 
     // Construct a future representing our server. This future processes all
@@ -98,7 +94,7 @@ fn main() {
     //    Client::new(&buffer, &handle, addr)
     //});
     let handle = lp.handle();
-    let server = channel.clients(buffer, &handle).for_each(|client| {
+    let server = channel.clients(&handle).for_each(|client| {
             let addr = client.get_addr();
             handle.spawn(client.serve().then(move |res| {
                 match res {

@@ -1,4 +1,3 @@
-use transfer::transfer;
 use tokio_io::io::{read_exact, write_all, Window};
 use futures::Future;
 use tokio_core::net::TcpStream;
@@ -7,15 +6,15 @@ use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::io::{self};
 use futures::future;
 
-use utilities::{EitherFuture::{Left,Right},other,name_port,print_type_info,timeout};
+use utilities::{EitherFuture::{Left,Right},other,name_port,timeout};
 
-use buffer::RcBuffer;
+use endpoint::{transfer,new_tcpendpoint};
 
 // Data used to when processing a client to perform various operations over its
 // lifetime.
 pub struct Client {
     conn: Option<TcpStream>,
-    buffer: RcBuffer,
+    //buffer: RcBuffer,
     //dns: BasicClientHandle,
     handle: Handle,
     addr: SocketAddr
@@ -25,8 +24,8 @@ impl Client {
     pub fn get_addr(&self) -> SocketAddr{
         self.addr
     }
-    pub fn new(s: TcpStream, buf: &RcBuffer, h: &Handle, a: SocketAddr) -> Client {
-        Client { conn:Some(s), buffer: buf.clone(), handle: h.clone(), addr: a }
+    pub fn new(s: TcpStream, h: &Handle, a: SocketAddr) -> Client {
+        Client { conn:Some(s), handle: h.clone(), addr: a }
     }
     /// This is the main entry point for starting a SOCKS proxy connection.
     ///
@@ -146,9 +145,9 @@ impl Client {
         // create two independent `Transfer` futures representing each half of
         // the connection. These two futures are `join`ed together to represent
         // the proxy operation happening.
-        let buffer = self.buffer.clone();
-        let result = pair.and_then(|(c1, c2)| transfer(c1, c2, buffer));
-        print_type_info("result", &result);
+        let result = pair.and_then(|(c1, c2)| 
+            transfer(new_tcpendpoint(c1), new_tcpendpoint(c2)));
+        //print_type_info("result", &result);
         result
     }    
 }
